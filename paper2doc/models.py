@@ -18,6 +18,34 @@ class Paragraph:
 
 
 @dataclass
+class TableCell:
+    row: int
+    column: int
+    bbox: BBox
+    text: str = ""
+    row_span: int = 1
+    col_span: int = 1
+    is_header: bool = False
+
+
+@dataclass
+class TableBlock:
+    id: int
+    page: int
+    bbox: BBox
+    rows: int
+    columns: int
+    cells: list[TableCell] = field(default_factory=list)
+    caption: str | None = None
+    caption_bbox: BBox | None = None
+    column: str = "full"
+    region: int = 0
+    horizontal_rules: bool = False
+    vertical_rules: bool = False
+    fallback_image_bytes: bytes | None = None
+
+
+@dataclass
 class ImageBlock:
     id: int
     page: int

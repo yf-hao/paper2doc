@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from .models import BBox, ImageBlock, Paragraph
+from .models import BBox, ImageBlock, Paragraph, TableBlock
 
 
 def classify_column(bbox: BBox, page_width: float) -> str:
@@ -19,7 +19,7 @@ def classify_column(bbox: BBox, page_width: float) -> str:
     return "full"
 
 
-def assign_columns(elements: Iterable[Paragraph | ImageBlock], page_widths: dict[int, float]):
+def assign_columns(elements: Iterable[Paragraph | ImageBlock | TableBlock], page_widths: dict[int, float]):
     """Assign columns in place and return the elements."""
     elements = list(elements)
     for element in elements:
@@ -27,7 +27,7 @@ def assign_columns(elements: Iterable[Paragraph | ImageBlock], page_widths: dict
     return elements
 
 
-def assign_regions(elements: Iterable[Paragraph | ImageBlock]) -> list:
+def assign_regions(elements: Iterable[Paragraph | ImageBlock | TableBlock]) -> list:
     """Assign a simple region number split by full-width elements on each page."""
     elements = list(elements)
     for page in sorted({item.page for item in elements}):
@@ -45,7 +45,7 @@ def assign_regions(elements: Iterable[Paragraph | ImageBlock]) -> list:
     return elements
 
 
-def reading_order(elements: Iterable[Paragraph | ImageBlock]) -> list:
+def reading_order(elements: Iterable[Paragraph | ImageBlock | TableBlock]) -> list:
     """Return normal reading order: full items, then left column, then right column."""
     groups: dict[tuple[int, int], list] = {}
     for item in elements:

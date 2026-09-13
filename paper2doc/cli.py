@@ -74,12 +74,12 @@ def main(argv: list[str] | None = None) -> int:
     progress = NullProgress() if args.no_progress else TerminalProgress()
     progress.stage("Reading PDF...")
     load_local_environment()
-    paragraphs, images, scan_info = read_pdf(
+    paragraphs, images, tables, scan_info = read_pdf(
         input_path,
         remove_page_numbers=not args.keep_page_numbers,
         remove_running_headers=not args.keep_running_headers,
     )
-    progress.stage(f"Read PDF: found {len(paragraphs)} paragraphs and {len(images)} images")
+    progress.stage(f"Read PDF: found {len(paragraphs)} paragraphs, {len(tables)} tables and {len(images)} images")
     if scan_info.is_scan:
         if not args.ocr:
             parser.error(scan_info.warning)
@@ -90,12 +90,12 @@ def main(argv: list[str] | None = None) -> int:
                 run_ocr(input_path, ocr_path)
             except Exception as exc:
                 parser.error(str(exc))
-            paragraphs, images, scan_info = read_pdf(
+            paragraphs, images, tables, scan_info = read_pdf(
                 ocr_path,
                 remove_page_numbers=not args.keep_page_numbers,
                 remove_running_headers=not args.keep_running_headers,
             )
-            progress.stage(f"OCR completed: found {len(paragraphs)} paragraphs and {len(images)} images")
+            progress.stage(f"OCR completed: found {len(paragraphs)} paragraphs, {len(tables)} tables and {len(images)} images")
         finally:
             ocr_path.unlink(missing_ok=True)
         if scan_info.is_scan:
@@ -121,6 +121,7 @@ def main(argv: list[str] | None = None) -> int:
         translation_description="Processing paragraphs" if args.no_translate else "Translating paragraphs",
         batch_size=args.batch_size,
         batch_min_size=args.batch_min_size,
+        tables=tables,
     )
     progress.stage("Writing DOCX... done")
     print(f"Wrote {output_path}")

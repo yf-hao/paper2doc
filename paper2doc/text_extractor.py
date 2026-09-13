@@ -4,12 +4,13 @@ import re
 from collections.abc import Iterable
 
 from .layout_analyzer import assign_columns, assign_regions, reading_order
-from .models import Paragraph
+from .models import Paragraph, TableBlock
+from .table_extractor import table_contains_bbox
 from .page_number_filter import filter_page_numbers
 from .pdf_api import fitz
 from .running_header_filter import filter_running_headers
 
-CAPTION_RE = re.compile(r"^\s*(?:fig(?:ure)?|table|图|表)\s*[\w.-]*\s*[:.]?", re.I)
+CAPTION_RE = re.compile(r"^\s*(?:fig(?:ure)?|图)\s*[\w.-]*\s*[:.]?", re.I)
 
 
 def _block_text(block: dict) -> str:
@@ -23,9 +24,14 @@ def _block_text(block: dict) -> str:
     return text
 
 
-def merge_text_blocks(blocks: Iterable[Paragraph], y_gap_factor: float = 1.8) -> list[Paragraph]:
+def merge_text_blocks(
+    blocks: Iterable[Paragraph],
+    y_gap_factor: float = 1.8,
+    tables: Iterable[TableBlock] | None = None,
+) -> list[Paragraph]:
     """Merge adjacent blocks that are clearly continuations in the same column."""
     result: list[Paragraph] = []
+    tables = list(tables or [])
     for block in sorted(blocks, key=lambda item: (item.page, item.region, item.bbox[1], item.bbox[0])):
         if not block.text:
             continue
@@ -36,6 +42,13 @@ def merge_text_blocks(blocks: Iterable[Paragraph], y_gap_factor: float = 1.8) ->
             and not block.is_caption
             and previous.page == block.page
             and previous.column == block.column
+            and not any(
+                table.page == block.page
+                and table.bbox[1] >= previous.bbox[3]
+                and table.bbox[3] <= block.bbox[1]
+                and table.column in {block.column, "full"}
+                for table in tables
+            )
         ):
             previous_height = max(previous.bbox[3] - previous.bbox[1], 1)
             vertical_gap = block.bbox[1] - previous.bbox[3]
@@ -60,8 +73,10 @@ def extract_paragraphs(
     document: fitz.Document,
     remove_page_numbers: bool = True,
     remove_running_headers: bool = True,
+    tables: Iterable[TableBlock] | None = None,
 ) -> list[Paragraph]:
     blocks: list[Paragraph] = []
+    tables = list(tables or [])
     page_widths = {}
     next_id = 1
     for page_number, page in enumerate(document):
@@ -73,6 +88,8 @@ def extract_paragraphs(
             if not text:
                 continue
             bbox = tuple(float(value) for value in block["bbox"])
+            if any(table_contains_bbox(table, bbox) for table in tables):
+                continue
             blocks.append(
                 Paragraph(
                     id=next_id,
@@ -92,5 +109,5 @@ def extract_paragraphs(
         )
     assign_columns(blocks, page_widths)
     assign_regions(blocks)
-    merged = merge_text_blocks(blocks)
+    merged = merge_text_blocks(blocks, tables=tables)
     return reading_order(merged)

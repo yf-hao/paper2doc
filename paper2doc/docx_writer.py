@@ -12,7 +12,8 @@ from docx.oxml.ns import qn
 from docx.shared import Cm, Mm, Pt
 from openai import APIStatusError
 
-from .models import ImageBlock, Paragraph
+from .models import ImageBlock, Paragraph, TableBlock
+from .layout_analyzer import reading_order
 from .progress import NullProgress, ProgressReporter
 
 
@@ -71,6 +72,75 @@ def _add_translation_table(document, text: str):
     return table
 
 
+def _set_table_borders(table, vertical: bool = True):
+    tbl_pr = table._tbl.tblPr
+    borders = tbl_pr.first_child_found_in("w:tblBorders")
+    if borders is None:
+        borders = OxmlElement("w:tblBorders")
+        tbl_pr.append(borders)
+    for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        border = borders.find(qn(f"w:{side}"))
+        if border is None:
+            border = OxmlElement(f"w:{side}")
+            borders.append(border)
+        border.set(qn("w:val"), "single" if vertical or side in {"top", "bottom", "insideH"} else "nil")
+        border.set(qn("w:sz"), "4")
+        border.set(qn("w:color"), "808080")
+
+
+def _set_header_repeat(cell):
+    tr_pr = cell._tc.getparent().get_or_add_trPr()
+    marker = OxmlElement("w:tblHeader")
+    marker.set(qn("w:val"), "true")
+    tr_pr.append(marker)
+
+
+def _add_native_table(document, table_block: TableBlock, translations: dict[str, str], chinese: bool = False):
+    table = document.add_table(rows=max(table_block.rows, 1), cols=max(table_block.columns, 1))
+    table.style = "Table Grid"
+    table.alignment = WD_TABLE_ALIGNMENT.LEFT
+    table.autofit = False
+    total_width = max(table_block.bbox[2] - table_block.bbox[0], 1)
+    widths = [total_width / max(table_block.columns, 1)] * max(table_block.columns, 1)
+    for cell in table_block.cells:
+        if cell.column < len(widths):
+            widths[cell.column] = max(widths[cell.column], cell.bbox[2] - cell.bbox[0])
+    width_total = sum(widths) or 1
+    for index, width in enumerate(widths):
+        table.columns[index].width = Cm(TABLE_WIDTH_CM * width / width_total)
+
+    cells = sorted(table_block.cells, key=lambda item: (item.row, item.column))
+    occupied: set[tuple[int, int]] = set()
+    for source_cell in cells:
+        if source_cell.row >= table_block.rows or source_cell.column >= table_block.columns:
+            continue
+        if (source_cell.row, source_cell.column) in occupied:
+            continue
+        target = table.cell(source_cell.row, source_cell.column)
+        if source_cell.row_span > 1 or source_cell.col_span > 1:
+            end_row = min(table_block.rows - 1, source_cell.row + source_cell.row_span - 1)
+            end_col = min(table_block.columns - 1, source_cell.column + source_cell.col_span - 1)
+            target = target.merge(table.cell(end_row, end_col))
+            occupied.update(
+                (row, column)
+                for row in range(source_cell.row, end_row + 1)
+                for column in range(source_cell.column, end_col + 1)
+            )
+        text = source_cell.text
+        if chinese and text:
+            text = translations.get(f"table:{table_block.id}:r{source_cell.row}:c{source_cell.column}", "")
+        target.text = text
+        target.width = Cm(TABLE_WIDTH_CM * widths[min(source_cell.column, len(widths) - 1)] / width_total)
+        paragraph = target.paragraphs[0]
+        _format(paragraph, FONT_CHINESE if chinese else FONT_ENGLISH, 2, indent=False)
+        if source_cell.is_header:
+            for run in paragraph.runs:
+                run.bold = True
+            _set_header_repeat(target)
+    _set_table_borders(table, vertical=table_block.vertical_rules)
+    return table
+
+
 def _translate_one(translator, text: str) -> str:
     value = translator.translate(text) if hasattr(translator, "translate") else translator(text)
     if not value or not value.strip():
@@ -101,6 +171,7 @@ def _chunk_translation_units(
 def _translation_units(
     paragraphs: list[Paragraph],
     attached: dict[int | None, list[ImageBlock]],
+    tables: list[TableBlock] | None = None,
 ) -> list[tuple[str, str]]:
     units: list[tuple[str, str]] = []
     for paragraph in paragraphs:
@@ -119,6 +190,12 @@ def _translation_units(
     for paragraph in paragraphs:
         if paragraph.is_caption and paragraph.text not in attached_captions:
             units.append((f"paragraph-caption:{paragraph.id}", paragraph.text))
+    for table in tables or []:
+        if table.caption:
+            units.append((f"table:{table.id}:caption", table.caption))
+        for cell in table.cells:
+            if cell.text.strip():
+                units.append((f"table:{table.id}:r{cell.row}:c{cell.column}", cell.text))
     return units
 
 
@@ -244,13 +321,15 @@ def write_docx(
     translation_description: str = "Translating paragraphs",
     batch_size: int = 7000,
     batch_min_size: int = 6000,
+    tables: list[TableBlock] | None = None,
 ) -> Path:
     progress = progress or NullProgress()
+    tables = list(tables or [])
     attached = {image.parent_paragraph_id: [] for image in images}
     for image in images:
         attached.setdefault(image.parent_paragraph_id, []).append(image)
 
-    units = _translation_units(paragraphs, attached)
+    units = _translation_units(paragraphs, attached, tables)
     progress.start(len(units), translation_description)
     try:
         translations = _translate_units(translator, units, batch_size, batch_min_size, progress)
@@ -269,24 +348,44 @@ def write_docx(
     section.left_margin = Cm(PAGE_MARGIN_CM)
     section.right_margin = Cm(PAGE_MARGIN_CM)
 
-    for paragraph in paragraphs:
-        if paragraph.is_caption:
-            continue
-        _add_text(document, paragraph.text, FONT_ENGLISH, 2)
-        _add_translation_table(document, translations[f"paragraph:{paragraph.id}"])
-        for image in sorted(attached.get(paragraph.id, []), key=lambda item: (item.page, item.bbox[1])):
-            image_paragraph = document.add_paragraph()
-            image_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            run = image_paragraph.add_run()
-            width = min(max(image.bbox[2] - image.bbox[0], 1), 451)
-            run.add_picture(BytesIO(image.image_bytes), width=Pt(width))
-            image_paragraph.paragraph_format.space_after = Pt(2)
-            if image.caption:
-                _add_text(document, image.caption, FONT_ENGLISH, 1)
-                _add_translation_table(document, translations[f"image-caption:{image.id}"])
+    elements = reading_order([*paragraphs, *tables, *images])
+    rendered_images: set[int] = set()
+    for element in elements:
+        if isinstance(element, Paragraph):
+            if element.is_caption:
+                continue
+            _add_text(document, element.text, FONT_ENGLISH, 2)
+            _add_translation_table(document, translations[f"paragraph:{element.id}"])
+            for image in sorted(attached.get(element.id, []), key=lambda item: (item.page, item.bbox[1])):
+                image_paragraph = document.add_paragraph()
+                image_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                run = image_paragraph.add_run()
+                width = min(max(image.bbox[2] - image.bbox[0], 1), 451)
+                run.add_picture(BytesIO(image.image_bytes), width=Pt(width))
+                image_paragraph.paragraph_format.space_after = Pt(2)
+                rendered_images.add(image.id)
+                if image.caption:
+                    _add_text(document, image.caption, FONT_ENGLISH, 1)
+                    _add_translation_table(document, translations[f"image-caption:{image.id}"])
+        elif isinstance(element, TableBlock):
+            if element.caption:
+                _add_text(document, element.caption, FONT_ENGLISH, 1)
+                _add_translation_table(document, translations[f"table:{element.id}:caption"])
+            if element.cells and element.rows and element.columns:
+                _add_native_table(document, element, translations)
+                _add_native_table(document, element, translations, chinese=True)
+            elif element.fallback_image_bytes:
+                image_paragraph = document.add_paragraph()
+                image_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                image_paragraph.add_run().add_picture(
+                    BytesIO(element.fallback_image_bytes),
+                    width=Pt(min(max(element.bbox[2] - element.bbox[0], 1), 451)),
+                )
 
     # Preserve images that could not be associated instead of silently dropping them.
     for image in sorted(attached.get(None, []), key=lambda item: (item.page, item.bbox[1])):
+        if image.id in rendered_images:
+            continue
         image_paragraph = document.add_paragraph()
         image_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         image_paragraph.add_run().add_picture(

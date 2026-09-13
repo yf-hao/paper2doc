@@ -176,6 +176,16 @@ translation before reporting failure.
 - Image association uses page, column, and geometric position.
 - A `Fig. 6` reference does not move an image.
 - The first version outputs a single-column DOCX to preserve reading order.
+- Text-based PDF tables are detected with PyMuPDF table APIs when available,
+  and with horizontal-rule plus whitespace/column inference for common tables
+  without vertical rules. Table text is removed from ordinary paragraph
+  extraction, so it is not duplicated.
+- Successfully extracted tables are written as native Word grids, followed by
+  a matching native Chinese grid. Captions remain above the table; empty cells,
+  approximate widths, header rows, spans, and horizontal rules are preserved
+  where the PDF exposes them.
+- If a table can be recognized but its cell grid cannot be recovered, the
+  original table region is inserted as an image rather than silently dropped.
 - The DOCX uses an A4, Chinese-core-style baseline with configurable margins,
   fonts, indentation, and paragraph spacing.
 - Translation progress advances after each paragraph or caption is translated
