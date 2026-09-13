@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "paper2doc"
+version = "0.1.0"
+description = "Convert research PDFs into bilingual English/Chinese DOCX documents."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "PyMuPDF>=1.23",
+  "python-docx>=1.1",
+  "Pillow>=10",
+  "openai>=1.0",
+  "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+ocr = [
+  "pytesseract>=0.3.13",
+  "ocrmypdf>=17.0",
+]
+
+[project.scripts]
+paper2doc = "paper2doc.cli:main"
+pdf2doc = "paper2doc.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
