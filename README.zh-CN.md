@@ -164,6 +164,26 @@ paper2doc paper.pdf --restart
 paper2doc paper.pdf --checkpoint-dir ./checkpoints
 ```
 
+### CLI 参数
+
+| 参数 | 说明 | 默认行为 |
+| --- | --- | --- |
+| `input.pdf` | 作为位置参数传入的 PDF 路径，不能与 `--input` 同时使用。 | 必填 |
+| `--input PATH` | 输入 PDF 路径。 | — |
+| `-o PATH`、`--output PATH` | 输出 DOCX 路径。 | PDF 同目录下的 `<输入文件名>_bilingual.docx` |
+| `--overwrite` | 允许覆盖已存在的 DOCX 文件。 | 不覆盖 |
+| `--ocr` | 对扫描版 PDF 运行 OCRmyPDF，需要可选 OCR 依赖和 Tesseract。 | 不启用 |
+| `--no-translate` | 不调用翻译 API，只提取并写入英文内容。 | 不启用 |
+| `--no-progress` | 关闭进度输出。 | 显示进度 |
+| `--keep-page-numbers` | 保留页眉或页脚中识别到的独立数字页码、罗马数字页码。 | 默认删除 |
+| `--keep-running-headers` | 保留重复出现的短页眉和页脚。 | 默认从第 2 页起删除 |
+| `--batch-size N` | 单次翻译请求允许的最大英文字符数。 | `7000` |
+| `--batch-min-size N` | 建议的批次最小字符数，不能大于 `--batch-size`。 | `6000` |
+| `--restart` | 忽略匹配的 checkpoint，从头开始翻译。 | 不启用 |
+| `--keep-checkpoint` | DOCX 成功写入后仍保留 checkpoint。 | 不保留 |
+| `--checkpoint-dir PATH` | 指定 checkpoint 文件目录。 | 平台用户缓存目录 |
+| `-h`、`--help` | 显示完整命令帮助。 | — |
+
 `pdf2doc` 仍然作为 `paper2doc` 的兼容别名保留。
 
 ## 输出规则

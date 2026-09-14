@@ -177,6 +177,26 @@ paper2doc paper.pdf --restart
 paper2doc paper.pdf --checkpoint-dir ./checkpoints
 ```
 
+### CLI parameters
+
+| Parameter | Description | Default |
+| --- | --- | --- |
+| `input.pdf` | Input PDF path as a positional argument. Cannot be combined with `--input`. | Required |
+| `--input PATH` | Input PDF path. | — |
+| `-o PATH`, `--output PATH` | Output DOCX path. | `<input_stem>_bilingual.docx` beside the PDF |
+| `--overwrite` | Allow an existing output DOCX to be replaced. | Disabled |
+| `--ocr` | Run OCRmyPDF for a scanned PDF. Requires the optional OCR dependencies and Tesseract. | Disabled |
+| `--no-translate` | Extract and write English content without calling the translation API. | Disabled |
+| `--no-progress` | Disable progress output. | Disabled |
+| `--keep-page-numbers` | Keep standalone numeric or Roman page numbers detected in headers/footers. | Removed |
+| `--keep-running-headers` | Keep repeated short running headers and footers. | Removed after page 1 |
+| `--batch-size N` | Maximum English characters per translation request. | `7000` |
+| `--batch-min-size N` | Recommended minimum batch size. Must not exceed `--batch-size`. | `6000` |
+| `--restart` | Ignore the matching checkpoint and translate from the beginning. | Disabled |
+| `--keep-checkpoint` | Keep the checkpoint after the DOCX is written successfully. | Disabled |
+| `--checkpoint-dir PATH` | Directory for checkpoint files. | Platform user cache |
+| `-h`, `--help` | Show the complete command help. | — |
+
 `pdf2doc` remains available as a compatibility alias for `paper2doc`.
 
 ## Output Behavior
