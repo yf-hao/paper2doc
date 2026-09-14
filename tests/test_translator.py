@@ -63,6 +63,21 @@ def test_translator_preserves_batch_markers():
     assert len(client.chat.completions.calls) == 1
 
 
+def test_batch_prompt_requires_complete_translation():
+    client = BatchFakeClient()
+    translator = Translator(
+        TranslatorConfig("key", "test-model", "http://localhost/v1"),
+        client=client,
+    )
+
+    translator.translate_batch([("paragraph:1", "First paragraph")])
+
+    prompt = client.chat.completions.calls[0]["messages"][0]["content"]
+    assert "不得删减、概括、跳过或改写" in prompt
+    assert "确保译文覆盖该标记后全部英文内容" in prompt
+    assert "不能只翻译段落中间或末尾" in prompt
+
+
 def test_env_overrides_existing_environment(tmp_path, monkeypatch):
     (tmp_path / ".env").write_text(
         "OPENAI_API_KEY=file-key\nOPENAI_MODEL=file-model\nOPENAI_BASE_URL=http://file/v1\n"
