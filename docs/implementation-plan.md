@@ -756,6 +756,8 @@ CLI 规则：
 - 完整段落默认不拆分；无法满足最小值的超长段落或最后一批必须明确标记为低于最小值。
 - 批量翻译必须保留段落 ID，并校验返回结果中的标记，不能因批量响应异常静默丢失译文。
 - 批量响应标记异常或返回 502 等可重试的 HTTP 错误时，先对原批次重试两次，再按二分策略拆分；单段批量响应仍异常时退回逐段翻译，不能静默丢失译文。
+- 每个成功批次都要原子写入 checkpoint；程序中断后下次执行复用已完成的段落、图注和表格单元格翻译，从未完成批次继续。
+- checkpoint 必须校验 PDF 内容哈希、提取选项和翻译批次配置；只有 DOCX 原子写入成功后才删除，`--restart` 可以主动忽略旧 checkpoint。
 - 默认过滤页面顶部或底部重复出现的独立数字/罗马数字页码；`--keep-page-numbers` 可以保留原始页码。
 - 默认过滤第 1 页之后重复出现的短页眉/页脚文本；`--keep-running-headers` 可以保留原始运行页眉和页脚。
 - 如果同时提供位置参数和 `--input`，程序应报错，避免输入来源不明确。
@@ -778,6 +780,19 @@ python -m paper2doc.cli \
   --input paper.pdf \
   --output paper_bilingual.docx
 ```
+
+断点续传相关选项：
+
+```bash
+paper2doc paper.pdf --restart
+paper2doc paper.pdf --keep-checkpoint
+paper2doc paper.pdf --checkpoint-dir ./checkpoints
+```
+
+默认 checkpoint 位于平台用户缓存目录：macOS 为
+`~/Library/Caches/paper2doc/checkpoints/`，Windows 为
+`%LOCALAPPDATA%\\paper2doc\\Cache\\checkpoints\\`，Linux 为
+`~/.cache/paper2doc/checkpoints/`。
 
 ### 16.4 检查输出
 
@@ -812,3 +827,5 @@ python -m paper2doc.cli \
 12. 指定目标期刊模板后，模板格式能够覆盖默认基线。
 13. 安装项目后可以直接执行 `paper2doc paper.pdf`，并在输入 PDF 所在目录生成默认输出文件。
 14. `--output` 指定时使用用户给定路径，不指定时使用 `<pdf_stem>_bilingual.docx`。
+15. 翻译中断后重新执行时，不重复请求已经成功完成的 batch。
+16. 所有翻译完成且 DOCX 成功写入后，checkpoint 自动删除。

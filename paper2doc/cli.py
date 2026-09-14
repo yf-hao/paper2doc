@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from .checkpoint import CheckpointError, CheckpointStore
 from .docx_writer import write_docx
 from .ocr import detect_scan
 from .ocr import run_ocr
@@ -37,6 +38,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-progress", action="store_true", help="disable progress output")
     parser.add_argument("--keep-page-numbers", action="store_true", help="keep standalone PDF page numbers")
     parser.add_argument("--keep-running-headers", action="store_true", help="keep repeated PDF headers and footers")
+    parser.add_argument("--restart", action="store_true", help="ignore any saved translation checkpoint")
+    parser.add_argument(
+        "--keep-checkpoint",
+        action="store_true",
+        help="keep the translation checkpoint after a successful DOCX is written",
+    )
+    parser.add_argument(
+        "--checkpoint-dir",
+        type=Path,
+        help="directory for translation checkpoints (default: platform user cache)",
+    )
     parser.add_argument(
         "--batch-size",
         type=positive_int,
@@ -112,17 +124,46 @@ def main(argv: list[str] | None = None) -> int:
             translator = Translator()
         except RuntimeError as exc:
             parser.error(str(exc))
-    write_docx(
-        paragraphs,
-        images,
-        translator,
-        output_path,
-        progress=progress,
-        translation_description="Processing paragraphs" if args.no_translate else "Translating paragraphs",
-        batch_size=args.batch_size,
-        batch_min_size=args.batch_min_size,
-        tables=tables,
-    )
+    checkpoint = None
+    if not args.no_translate:
+        translator_config = getattr(translator, "config", None)
+        checkpoint_settings = {
+            "batch_size": args.batch_size,
+            "batch_min_size": args.batch_min_size,
+            "remove_page_numbers": not args.keep_page_numbers,
+            "remove_running_headers": not args.keep_running_headers,
+            "model": getattr(translator_config, "model", None),
+            "base_url": getattr(translator_config, "base_url", None),
+        }
+        try:
+            checkpoint = CheckpointStore(
+                input_path,
+                checkpoint_settings,
+                directory=args.checkpoint_dir,
+                restart=args.restart,
+            )
+        except CheckpointError as exc:
+            parser.error(f"{exc}; use --restart to discard the saved checkpoint")
+        if checkpoint.has_saved_translations:
+            progress.stage(f"Resuming from checkpoint: {checkpoint.path}")
+        else:
+            progress.stage(f"Translation checkpoint: {checkpoint.path}")
+    try:
+        write_docx(
+            paragraphs,
+            images,
+            translator,
+            output_path,
+            progress=progress,
+            translation_description="Processing paragraphs" if args.no_translate else "Translating paragraphs",
+            batch_size=args.batch_size,
+            batch_min_size=args.batch_min_size,
+            tables=tables,
+            checkpoint=checkpoint,
+            keep_checkpoint=args.keep_checkpoint,
+        )
+    except CheckpointError as exc:
+        parser.error(str(exc))
     progress.stage("Writing DOCX... done")
     print(f"Wrote {output_path}")
     return 0

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from io import BytesIO
+import os
 from pathlib import Path
+import tempfile
 
 from docx import Document
 from docx.enum.section import WD_SECTION
@@ -12,6 +14,7 @@ from docx.oxml.ns import qn
 from docx.shared import Cm, Mm, Pt
 from openai import APIStatusError
 
+from .checkpoint import CheckpointStore
 from .models import ImageBlock, Paragraph, TableBlock
 from .layout_analyzer import reading_order
 from .progress import NullProgress, ProgressReporter
@@ -214,19 +217,27 @@ def _translate_units(
     batch_size: int,
     batch_min_size: int,
     progress: ProgressReporter,
+    checkpoint: CheckpointStore | None = None,
 ) -> dict[str, str]:
     if batch_min_size <= 0:
         raise ValueError("batch_min_size must be greater than zero")
     if batch_min_size > batch_size:
         raise ValueError("batch_min_size cannot be greater than batch_size")
-    translations: dict[str, str] = {}
-    completed = 0
+    translations = checkpoint.restored_translations(units) if checkpoint else {}
+    completed = len(translations)
+    if completed:
+        progress.stage(f"Restored translations: {completed}/{len(units)}")
+        progress.update(completed)
+    pending_units = [unit for unit in units if unit[0] not in translations]
     batch_translator = getattr(translator, "translate_batch", None)
     if callable(batch_translator):
         batches = list(_chunk_translation_units(units, batch_size))
         total_batches = len(batches)
         for batch_number, batch in enumerate(batches, start=1):
-            batch_chars = sum(len(text) for _unit_id, text in batch)
+            pending_batch = [unit for unit in batch if unit[0] not in translations]
+            if not pending_batch:
+                continue
+            batch_chars = sum(len(text) for _unit_id, text in pending_batch)
             short_batch_suffix = " (below minimum)" if batch_chars < batch_min_size else ""
             progress.stage(
                 f"Translating batch {batch_number}/{total_batches} "
@@ -234,11 +245,13 @@ def _translate_units(
             )
             batch_translations = _translate_batch_with_fallback(
                 translator,
-                batch,
+                pending_batch,
                 progress,
                 f"{batch_number}/{total_batches}",
             )
-            for unit_id, _text in batch:
+            if checkpoint:
+                checkpoint.record(pending_batch, batch_translations)
+            for unit_id, _text in pending_batch:
                 translations[unit_id] = batch_translations[unit_id]
                 completed += 1
                 progress.update(completed)
@@ -248,8 +261,11 @@ def _translate_units(
             )
         return translations
 
-    for unit_id, text in units:
-        translations[unit_id] = _translate_one(translator, text)
+    for unit_id, text in pending_units:
+        translation = _translate_one(translator, text)
+        translations[unit_id] = translation
+        if checkpoint:
+            checkpoint.record([(unit_id, text)], {unit_id: translation})
         completed += 1
         progress.update(completed)
     return translations
@@ -331,6 +347,8 @@ def write_docx(
     batch_size: int = 7000,
     batch_min_size: int = 6000,
     tables: list[TableBlock] | None = None,
+    checkpoint: CheckpointStore | None = None,
+    keep_checkpoint: bool = False,
 ) -> Path:
     progress = progress or NullProgress()
     tables = list(tables or [])
@@ -341,7 +359,14 @@ def write_docx(
     units = _translation_units(paragraphs, attached, tables)
     progress.start(len(units), translation_description)
     try:
-        translations = _translate_units(translator, units, batch_size, batch_min_size, progress)
+        translations = _translate_units(
+            translator,
+            units,
+            batch_size,
+            batch_min_size,
+            progress,
+            checkpoint=checkpoint,
+        )
     except Exception:
         progress.fail()
         raise
@@ -413,5 +438,20 @@ def write_docx(
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=False, exist_ok=True) if output_path.parent != Path(".") else None
-    document.save(output_path)
+    temporary_output: Path | None = None
+    try:
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{output_path.name}.",
+            suffix=".tmp",
+            dir=output_path.parent,
+        )
+        os.close(descriptor)
+        temporary_output = Path(temporary_name)
+        document.save(temporary_output)
+        os.replace(temporary_output, output_path)
+    finally:
+        if temporary_output is not None:
+            temporary_output.unlink(missing_ok=True)
+    if checkpoint and not keep_checkpoint:
+        checkpoint.delete()
     return output_path

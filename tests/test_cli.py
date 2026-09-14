@@ -28,6 +28,15 @@ def test_batch_size_option_defaults_and_accepts_override():
     assert parser.parse_args(["paper.pdf", "--batch-min-size", "4000"]).batch_min_size == 4000
 
 
+def test_checkpoint_options_are_available():
+    args = build_parser().parse_args(
+        ["paper.pdf", "--restart", "--keep-checkpoint", "--checkpoint-dir", "/tmp/checkpoints"]
+    )
+    assert args.restart is True
+    assert args.keep_checkpoint is True
+    assert args.checkpoint_dir == Path("/tmp/checkpoints")
+
+
 def test_positional_and_option_input_conflict(tmp_path):
     input_path = tmp_path / "paper.pdf"
     input_path.write_bytes(b"%PDF-1.4\n")

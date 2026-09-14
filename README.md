@@ -164,6 +164,19 @@ error such as 502, the program first retries the same batch twice. It then
 retries smaller batches and ultimately falls back to single-paragraph
 translation before reporting failure.
 
+Successful translation batches are saved to a checkpoint in the platform user
+cache. If the process is interrupted, the next run restores completed
+paragraphs, captions, and table-cell translations and resumes from the first
+unfinished batch. The checkpoint is removed only after the DOCX is written
+successfully. Use `--restart` to ignore an existing checkpoint,
+`--keep-checkpoint` to retain it after success, or `--checkpoint-dir` to choose
+another directory:
+
+```bash
+paper2doc paper.pdf --restart
+paper2doc paper.pdf --checkpoint-dir ./checkpoints
+```
+
 `pdf2doc` remains available as a compatibility alias for `paper2doc`.
 
 ## Output Behavior

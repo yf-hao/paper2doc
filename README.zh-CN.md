@@ -153,6 +153,17 @@ paper2doc paper.pdf --no-progress
 对原批次重试两次；仍然失败后再拆成更小批次重试，最后退回单段翻译。
 单段仍然失败时才报告错误。
 
+每个成功的翻译批次都会保存到平台用户缓存目录中的 checkpoint 文件。
+如果程序中断，下次执行时会恢复已经完成的段落、图注和表格单元格翻译，
+从第一个未完成的批次继续。只有 DOCX 成功写入后才会删除 checkpoint。
+可以使用 `--restart` 忽略已有 checkpoint，使用 `--keep-checkpoint` 在成功后
+保留 checkpoint，或使用 `--checkpoint-dir` 指定目录：
+
+```bash
+paper2doc paper.pdf --restart
+paper2doc paper.pdf --checkpoint-dir ./checkpoints
+```
+
 `pdf2doc` 仍然作为 `paper2doc` 的兼容别名保留。
 
 ## 输出规则
