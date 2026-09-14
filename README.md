@@ -207,6 +207,9 @@ paper2doc paper.pdf --checkpoint-dir ./checkpoints
 - Text paragraphs and captions use left alignment rather than full justification.
 - Images are inserted after the associated English/Chinese paragraph pair.
 - Image association uses page, column, and geometric position.
+- Text that continues from the end of the left column into the right column, or across a
+  page break, is merged into one logical paragraph. Headings, lists, captions, tables,
+  and genuine new paragraphs remain separate.
 - A `Fig. 6` reference does not move an image.
 - The first version outputs a single-column DOCX to preserve reading order.
 - Text-based PDF tables are detected with PyMuPDF table APIs when available,

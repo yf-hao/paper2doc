@@ -15,6 +15,7 @@ class Paragraph:
     column: str = "full"
     region: int = 0
     is_caption: bool = False
+    layout_parts: list[tuple[int, BBox, str]] = field(default_factory=list, repr=False)
 
 
 @dataclass

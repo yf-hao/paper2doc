@@ -21,13 +21,14 @@ def read_pdf(
     with fitz.open(path) as document:
         scan_info = detect_scan(document)
         tables = extract_tables(document)
+        images = extract_images(document)
         paragraphs = extract_paragraphs(
             document,
             remove_page_numbers=remove_page_numbers,
             remove_running_headers=remove_running_headers,
             tables=tables,
+            images=images,
         )
-        images = extract_images(document)
         paragraphs, images = associate_images(paragraphs, images)
         page_widths = {page_number: document[page_number].rect.width for page_number in range(len(document))}
         all_elements = [*paragraphs, *images, *tables]
