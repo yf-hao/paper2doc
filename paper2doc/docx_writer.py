@@ -141,6 +141,15 @@ def _add_native_table(document, table_block: TableBlock, translations: dict[str,
     return table
 
 
+def _add_table_spacer(document):
+    paragraph = document.add_paragraph()
+    paragraph.paragraph_format.first_line_indent = Cm(0)
+    paragraph.paragraph_format.space_before = Pt(0)
+    paragraph.paragraph_format.space_after = Pt(0)
+    paragraph.paragraph_format.line_spacing = 1
+    return paragraph
+
+
 def _translate_one(translator, text: str) -> str:
     value = translator.translate(text) if hasattr(translator, "translate") else translator(text)
     if not value or not value.strip():
@@ -373,6 +382,7 @@ def write_docx(
                 _add_translation_table(document, translations[f"table:{element.id}:caption"])
             if element.cells and element.rows and element.columns:
                 _add_native_table(document, element, translations)
+                _add_table_spacer(document)
                 _add_native_table(document, element, translations, chinese=True)
             elif element.fallback_image_bytes:
                 image_paragraph = document.add_paragraph()

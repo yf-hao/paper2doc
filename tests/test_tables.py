@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from docx import Document
+from docx.oxml.ns import qn
 
 from paper2doc.docx_writer import write_docx
 from paper2doc.models import TableBlock, TableCell
@@ -150,3 +151,10 @@ def test_table_markers_and_native_english_chinese_grids(tmp_path: Path):
         ["中：Header", "中：Value"],
         ["中：A", ""],
     ]
+    body_children = list(document._element.body)
+    english_index = body_children.index(native_tables[0]._element)
+    chinese_index = body_children.index(native_tables[1]._element)
+    assert chinese_index == english_index + 2
+    spacer = body_children[english_index + 1]
+    assert spacer.tag == qn("w:p")
+    assert "".join(spacer.itertext()).strip() == ""
