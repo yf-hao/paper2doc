@@ -452,6 +452,10 @@ def write_docx(
     finally:
         if temporary_output is not None:
             temporary_output.unlink(missing_ok=True)
-    if checkpoint and not keep_checkpoint:
-        checkpoint.delete()
+    if checkpoint:
+        if keep_checkpoint:
+            progress.stage(f"Checkpoint kept: {checkpoint.path}")
+        else:
+            checkpoint.delete()
+            progress.stage(f"Checkpoint removed: {checkpoint.path}")
     return output_path

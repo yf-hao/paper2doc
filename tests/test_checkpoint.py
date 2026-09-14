@@ -30,6 +30,26 @@ class RecordingBatchTranslator:
         return {unit_id: f"中文：{text}" for unit_id, text in units}
 
 
+class RecordingProgress:
+    def __init__(self):
+        self.stages = []
+
+    def stage(self, message):
+        self.stages.append(message)
+
+    def start(self, total, description):
+        pass
+
+    def update(self, completed):
+        pass
+
+    def finish(self):
+        pass
+
+    def fail(self):
+        pass
+
+
 def _settings():
     return {
         "batch_size": 5,
@@ -81,6 +101,7 @@ def test_resume_skips_completed_batch_and_deletes_checkpoint_after_docx(tmp_path
 
     second_store = CheckpointStore(input_path, _settings(), directory=checkpoint_dir)
     second_translator = RecordingBatchTranslator()
+    progress = RecordingProgress()
     output = tmp_path / "resumed.docx"
     write_docx(
         paragraphs,
@@ -90,9 +111,10 @@ def test_resume_skips_completed_batch_and_deletes_checkpoint_after_docx(tmp_path
         batch_size=5,
         batch_min_size=1,
         checkpoint=second_store,
+        progress=progress,
     )
 
     assert second_translator.batch_calls == [[("paragraph:2", "67890")]]
     assert output.is_file()
     assert not second_store.path.exists()
-
+    assert progress.stages[-1] == f"Checkpoint removed: {second_store.path}"
