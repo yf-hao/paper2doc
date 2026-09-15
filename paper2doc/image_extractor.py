@@ -5,7 +5,6 @@ import re
 
 from PIL import Image
 
-from .formula import formula_to_latex
 from .layout_analyzer import assign_columns, assign_regions
 from .models import ImageBlock
 from .pdf_api import fitz
@@ -165,7 +164,6 @@ def _extract_formula_images(
                     bbox=bbox,
                     image_bytes=_render_formula(page, bbox),
                     is_formula=True,
-                    formula_latex=formula_to_latex(_members),
                 )
             )
             formula_id += 1

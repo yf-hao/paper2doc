@@ -45,14 +45,6 @@ rehash
 optional OCR dependencies, and the CLI entry points. A separate
 `requirements.txt` file is not needed.
 
-Pandoc is optional. Install it to enable the LaTeX-to-Word-equation path for
-detected display equations; without it, the converter automatically uses the
-original PDF region as an image fallback:
-
-```bash
-brew install pandoc
-```
-
 ## Configure the Translation Service
 
 `.env.local` is a template only. Copy it to `.env` in the project root, then
@@ -218,10 +210,9 @@ paper2doc paper.pdf --checkpoint-dir ./checkpoints
 - Text that continues from the end of the left column into the right column, or across a
   page break, is merged into one logical paragraph. Headings, lists, captions, tables,
   and genuine new paragraphs remain separate.
-- Display equations are detected separately from body text and first converted to LaTeX
-  and Word OMML when Pandoc is available. If conversion fails, the original PDF region
-  is rendered as an image. Their symbols, subscripts, superscripts, layout, and equation
-  numbers are not sent to the translation service.
+- Display equations are detected separately from body text and rendered from the original
+  PDF region as images in the DOCX. Their symbols, subscripts, superscripts, layout, and
+  equation numbers are not sent to the translation service.
 - A `Fig. 6` reference does not move an image.
 - The first version outputs a single-column DOCX to preserve reading order.
 - Text-based PDF tables are detected with PyMuPDF table APIs when available,

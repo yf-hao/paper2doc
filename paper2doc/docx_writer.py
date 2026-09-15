@@ -15,7 +15,6 @@ from docx.shared import Cm, Mm, Pt
 from openai import APIStatusError
 
 from .checkpoint import CheckpointStore
-from .formula import latex_to_omml
 from .models import ImageBlock, Paragraph, TableBlock
 from .layout_analyzer import reading_order
 from .progress import NullProgress, ProgressReporter
@@ -74,16 +73,6 @@ def _add_translation_table(document, text: str):
     paragraph.text = text
     _format(paragraph, FONT_CHINESE, 4, indent=False)
     return table
-
-
-def _add_formula(document, image: ImageBlock) -> bool:
-    if not image.formula_latex:
-        return False
-    omml = latex_to_omml(image.formula_latex)
-    if omml is None:
-        return False
-    document._element.body.append(omml)
-    return True
 
 
 def _set_table_borders(table, vertical: bool = True):
@@ -402,9 +391,6 @@ def write_docx(
             _add_text(document, element.text, FONT_ENGLISH, 2)
             _add_translation_table(document, translations[f"paragraph:{element.id}"])
             for image in sorted(attached.get(element.id, []), key=lambda item: (item.page, item.bbox[1])):
-                if image.is_formula and _add_formula(document, image):
-                    rendered_images.add(image.id)
-                    continue
                 image_paragraph = document.add_paragraph()
                 image_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 run = image_paragraph.add_run()
@@ -434,9 +420,6 @@ def write_docx(
     # Preserve images that could not be associated instead of silently dropping them.
     for image in sorted(attached.get(None, []), key=lambda item: (item.page, item.bbox[1])):
         if image.id in rendered_images:
-            continue
-        if image.is_formula and _add_formula(document, image):
-            rendered_images.add(image.id)
             continue
         image_paragraph = document.add_paragraph()
         image_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
