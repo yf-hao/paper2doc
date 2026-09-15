@@ -5,7 +5,7 @@ from docx import Document
 
 from paper2doc.docx_writer import write_docx
 from paper2doc.image_extractor import extract_images
-from paper2doc.models import ImageBlock, Paragraph
+from paper2doc.models import ImageBlock, InlineFormula, Paragraph
 from paper2doc.text_extractor import extract_paragraphs
 
 
@@ -140,3 +140,50 @@ def test_formula_image_is_not_added_to_translation_units(tmp_path):
 
     assert translator.units == [("paragraph:1", "Text before the equation.")]
     assert len(Document(output).inline_shapes) == 1
+
+
+def test_inline_subscript_is_detected_from_span_geometry():
+    page = FormulaPage()
+    page.blocks = [
+        {
+            "type": 0,
+            "bbox": (50, 100, 250, 120),
+            "lines": [
+                {
+                    "spans": [
+                        {"text": "The value ", "bbox": (50, 100, 100, 112), "size": 12},
+                        {"text": "u", "bbox": (100, 100, 108, 112), "size": 12},
+                        {"text": "x", "bbox": (109, 106, 115, 116), "size": 8},
+                        {"text": " is measured.", "bbox": (116, 100, 190, 112), "size": 12},
+                    ]
+                }
+            ],
+        }
+    ]
+
+    paragraphs = extract_paragraphs(
+        [page],
+        remove_page_numbers=False,
+        remove_running_headers=False,
+    )
+
+    assert [paragraph.text for paragraph in paragraphs] == ["The value ux is measured."]
+    assert paragraphs[0].inline_formulas == [
+        InlineFormula(text="ux", base="u", subscript="x")
+    ]
+
+
+def test_inline_subscript_is_written_as_word_math_not_an_image(tmp_path):
+    formula = InlineFormula(text="ux", base="u", subscript="x")
+    output = tmp_path / "inline-formula.docx"
+    write_docx(
+        [Paragraph(1, 0, (0, 0, 200, 20), "The value ux is measured.", inline_formulas=[formula])],
+        [],
+        lambda text: f"中文：{text}",
+        output,
+    )
+
+    document = Document(output)
+    subscript_elements = list(document._element.body.iter("{http://schemas.openxmlformats.org/officeDocument/2006/math}sSub"))
+    assert len(subscript_elements) == 2
+    assert len(document.inline_shapes) == 0

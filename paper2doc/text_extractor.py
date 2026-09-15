@@ -4,7 +4,7 @@ import re
 from collections.abc import Iterable
 
 from .layout_analyzer import assign_columns, assign_regions, reading_order
-from .models import BBox, ImageBlock, Paragraph, TableBlock
+from .models import BBox, ImageBlock, InlineFormula, Paragraph, TableBlock
 from .table_extractor import table_contains_bbox
 from .page_number_filter import filter_page_numbers
 from .pdf_api import fitz
@@ -30,6 +30,54 @@ def _block_text(block: dict) -> str:
     text = " ".join(lines).strip()
     text = re.sub(r"\s+", " ", text)
     return text
+
+
+def _span_bbox(span: dict) -> BBox | None:
+    value = span.get("bbox")
+    if not value or len(value) < 4:
+        return None
+    return tuple(float(item) for item in value[:4])
+
+
+def _inline_formulas(block: dict) -> list[InlineFormula]:
+    formulas: list[InlineFormula] = []
+    for line in block.get("lines", []):
+        spans = [
+            span
+            for span in line.get("spans", [])
+            if str(span.get("text", "")).strip() and _span_bbox(span)
+        ]
+        for index in range(len(spans) - 1):
+            base_span = spans[index]
+            modifier_span = spans[index + 1]
+            base_text = str(base_span.get("text", "")).strip()
+            modifier_text = str(modifier_span.get("text", "")).strip()
+            base_bbox = _span_bbox(base_span)
+            modifier_bbox = _span_bbox(modifier_span)
+            if (
+                not base_bbox
+                or not modifier_bbox
+                or len(base_text) > 2
+                or len(modifier_text) > 3
+                or modifier_bbox[0] - base_bbox[2] > 5
+            ):
+                continue
+            base_size = float(base_span.get("size", base_bbox[3] - base_bbox[1]))
+            modifier_size = float(modifier_span.get("size", modifier_bbox[3] - modifier_bbox[1]))
+            smaller = modifier_size <= base_size * 0.9
+            is_subscript = modifier_bbox[1] >= base_bbox[1] + (base_bbox[3] - base_bbox[1]) * 0.35
+            is_superscript = modifier_bbox[3] <= base_bbox[3] - (base_bbox[3] - base_bbox[1]) * 0.25
+            if not smaller or not (is_subscript or is_superscript):
+                continue
+            formulas.append(
+                InlineFormula(
+                    text=base_text + modifier_text,
+                    base=base_text,
+                    subscript=modifier_text if is_subscript else None,
+                    superscript=modifier_text if is_superscript else None,
+                )
+            )
+    return formulas
 
 
 def merge_text_blocks(
@@ -204,6 +252,7 @@ def extract_paragraphs(
                     bbox=bbox,
                     text=text,
                     is_caption=bool(CAPTION_RE.match(text)),
+                    inline_formulas=_inline_formulas(block),
                 )
             )
             next_id += 1

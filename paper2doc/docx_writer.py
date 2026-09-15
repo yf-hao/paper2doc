@@ -15,7 +15,7 @@ from docx.shared import Cm, Mm, Pt
 from openai import APIStatusError
 
 from .checkpoint import CheckpointStore
-from .models import ImageBlock, Paragraph, TableBlock
+from .models import ImageBlock, InlineFormula, Paragraph, TableBlock
 from .layout_analyzer import reading_order
 from .progress import NullProgress, ProgressReporter
 
@@ -43,13 +43,91 @@ def _format(paragraph, font_name: str, after: float, indent: bool = True):
         )
 
 
-def _add_text(document, text: str, font_name: str, after: float):
+def _math_run(text: str):
+    run = OxmlElement("m:r")
+    text_element = OxmlElement("m:t")
+    text_element.text = text
+    run.append(text_element)
+    return run
+
+
+def _inline_formula_element(formula: InlineFormula):
+    if formula.subscript and formula.superscript:
+        element = OxmlElement("m:sSubSup")
+        subscript_tag = "m:sub"
+        superscript_tag = "m:sup"
+    elif formula.subscript:
+        element = OxmlElement("m:sSub")
+        subscript_tag = "m:sub"
+        superscript_tag = None
+    elif formula.superscript:
+        element = OxmlElement("m:sSup")
+        subscript_tag = None
+        superscript_tag = "m:sup"
+    else:
+        element = OxmlElement("m:oMath")
+        subscript_tag = None
+        superscript_tag = None
+
+    base = OxmlElement("m:e")
+    base.append(_math_run(formula.base))
+    element.append(base)
+    if subscript_tag:
+        subscript = OxmlElement(subscript_tag)
+        subscript.append(_math_run(formula.subscript))
+        element.append(subscript)
+    if superscript_tag:
+        superscript = OxmlElement(superscript_tag)
+        superscript.append(_math_run(formula.superscript))
+        element.append(superscript)
+    return element
+
+
+def _append_rich_text(paragraph, text: str, formulas: list[InlineFormula] | None = None):
+    formulas = formulas or []
+    cursor = 0
+    for formula in formulas:
+        candidates = [formula.text]
+        if formula.subscript:
+            candidates.append(f"{formula.base}_{formula.subscript}")
+        if formula.superscript:
+            candidates.append(f"{formula.base}^{formula.superscript}")
+        matches = [
+            (text.find(candidate, cursor), candidate)
+            for candidate in candidates
+            if text.find(candidate, cursor) >= 0
+        ]
+        if not matches:
+            continue
+        position, matched = min(matches, key=lambda item: item[0])
+        if position > cursor:
+            paragraph.add_run(text[cursor:position])
+        paragraph._p.append(_inline_formula_element(formula))
+        cursor = position + len(matched)
+    if cursor < len(text):
+        paragraph.add_run(text[cursor:])
+
+
+def _add_text(
+    document,
+    text: str,
+    font_name: str,
+    after: float,
+    inline_formulas: list[InlineFormula] | None = None,
+):
     paragraph = document.add_paragraph(text)
+    if inline_formulas:
+        paragraph.clear()
+        _append_rich_text(paragraph, text, inline_formulas)
     _format(paragraph, font_name, after)
     return paragraph
 
 
-def _add_translation_table(document, text: str):
+def _add_translation_table(
+    document,
+    text: str,
+    inline_formulas: list[InlineFormula] | None = None,
+):
     table = document.add_table(rows=1, cols=1)
     table.style = "Table Grid"
     table.alignment = WD_TABLE_ALIGNMENT.LEFT
@@ -70,7 +148,11 @@ def _add_translation_table(document, text: str):
     shading.set(qn("w:fill"), "B7D4EF")
     cell_properties.append(shading)
     paragraph = cell.paragraphs[0]
-    paragraph.text = text
+    if inline_formulas:
+        paragraph.clear()
+        _append_rich_text(paragraph, text, inline_formulas)
+    else:
+        paragraph.text = text
     _format(paragraph, FONT_CHINESE, 4, indent=False)
     return table
 
@@ -388,8 +470,18 @@ def write_docx(
         if isinstance(element, Paragraph):
             if element.is_caption:
                 continue
-            _add_text(document, element.text, FONT_ENGLISH, 2)
-            _add_translation_table(document, translations[f"paragraph:{element.id}"])
+            _add_text(
+                document,
+                element.text,
+                FONT_ENGLISH,
+                2,
+                inline_formulas=element.inline_formulas,
+            )
+            _add_translation_table(
+                document,
+                translations[f"paragraph:{element.id}"],
+                inline_formulas=element.inline_formulas,
+            )
             for image in sorted(attached.get(element.id, []), key=lambda item: (item.page, item.bbox[1])):
                 image_paragraph = document.add_paragraph()
                 image_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER

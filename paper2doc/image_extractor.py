@@ -12,6 +12,10 @@ from .pdf_api import fitz
 MATH_SYMBOL_RE = re.compile(r"[∑∫∬∭∮√∞≈≠≤≥±×÷∂∇∈∉⊂⊃→←↔⋅∕−]")
 MATH_OPERATOR_RE = re.compile(r"[=+*/^]")
 EQUATION_NUMBER_RE = re.compile(r"^\(?\d+[a-z]?\)?[,.]?$", re.I)
+PROSE_WORD_RE = re.compile(
+    r"\b(?:and|are|controls|from|growth|is|maximum|method|rate|the|this|value|where|with)\b",
+    re.I,
+)
 
 
 def _block_text(block: dict) -> str:
@@ -39,6 +43,8 @@ def _union_bbox(first, second):
 def _is_formula_seed(text: str) -> bool:
     if not text or len(text) > 120 or text.endswith((".", "。", "！", "!")):
         return False
+    if len(text.split()) > 8 or PROSE_WORD_RE.search(text):
+        return False
     if MATH_SYMBOL_RE.search(text):
         return True
     return (
@@ -52,7 +58,11 @@ def _is_formula_fragment(text: str) -> bool:
         return False
     if MATH_SYMBOL_RE.search(text) or MATH_OPERATOR_RE.search(text):
         return True
-    return bool(re.fullmatch(r"[\w.,(){}\[\]′″˙\u00ad]+", text, re.UNICODE))
+    if not re.fullmatch(r"[\w.,(){}\[\]′″˙\u00ad]+", text, re.UNICODE):
+        return False
+    if PROSE_WORD_RE.fullmatch(text):
+        return False
+    return len(text) <= 2 or any(character.isdigit() or character.isupper() for character in text)
 
 
 def _gap(first, second) -> tuple[float, float]:

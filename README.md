@@ -213,6 +213,8 @@ paper2doc paper.pdf --checkpoint-dir ./checkpoints
 - Display equations are detected separately from body text and rendered from the original
   PDF region as images in the DOCX. Their symbols, subscripts, superscripts, layout, and
   equation numbers are not sent to the translation service.
+- Inline formulas are written as native Word math elements, so a subscript such as `uₓ`
+  remains a subscript instead of becoming plain `ux`.
 - A `Fig. 6` reference does not move an image.
 - The first version outputs a single-column DOCX to preserve reading order.
 - Text-based PDF tables are detected with PyMuPDF table APIs when available,

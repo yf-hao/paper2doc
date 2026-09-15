@@ -7,6 +7,14 @@ BBox = tuple[float, float, float, float]
 
 
 @dataclass
+class InlineFormula:
+    text: str
+    base: str
+    subscript: str | None = None
+    superscript: str | None = None
+
+
+@dataclass
 class Paragraph:
     id: int
     page: int
@@ -16,6 +24,7 @@ class Paragraph:
     region: int = 0
     is_caption: bool = False
     layout_parts: list[tuple[int, BBox, str]] = field(default_factory=list, repr=False)
+    inline_formulas: list[InlineFormula] = field(default_factory=list, repr=False)
 
 
 @dataclass
