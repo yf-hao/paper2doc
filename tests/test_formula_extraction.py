@@ -106,6 +106,45 @@ def test_formula_text_is_rendered_once_and_removed_from_paragraphs():
     ]
 
 
+def test_block_formulas_stay_separate_from_intervening_prose_and_keep_numbers():
+    page = FormulaPage()
+    page.blocks = [
+        {
+            "type": 0,
+            "bbox": (100, 100, 180, 120),
+            "lines": [{"spans": [{"text": "x = y"}]}],
+        },
+        {
+            "type": 0,
+            "bbox": (500, 100, 520, 120),
+            "lines": [{"spans": [{"text": "(1)"}]}],
+        },
+        {
+            "type": 0,
+            "bbox": (50, 165, 550, 195),
+            "lines": [{"spans": [{"text": "where P is the maximum growth rate."}]}],
+        },
+        {
+            "type": 0,
+            "bbox": (100, 240, 180, 260),
+            "lines": [{"spans": [{"text": "G = exp"}]}],
+        },
+        {
+            "type": 0,
+            "bbox": (500, 240, 520, 260),
+            "lines": [{"spans": [{"text": "(2)"}]}],
+        },
+    ]
+
+    formulas = extract_images([page])
+
+    assert len(formulas) == 2
+    assert [(formula.bbox[1], formula.bbox[3], formula.bbox[2]) for formula in formulas] == [
+        (100, 120, 520),
+        (240, 260, 520),
+    ]
+
+
 def test_formula_image_is_not_added_to_translation_units(tmp_path):
     image_data = BytesIO()
     Image.new("RGB", (20, 10), "white").save(image_data, format="PNG")

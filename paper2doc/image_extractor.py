@@ -11,7 +11,7 @@ from .pdf_api import fitz
 
 MATH_SYMBOL_RE = re.compile(r"[∑∫∬∭∮√∞≈≠≤≥±×÷∂∇∈∉⊂⊃→←↔⋅∕−]")
 MATH_OPERATOR_RE = re.compile(r"[=+*/^]")
-EQUATION_NUMBER_RE = re.compile(r"^\(?\d+[a-z]?\)?[,.]?$", re.I)
+EQUATION_NUMBER_RE = re.compile(r"^\s*[,.;:]?\s*[\(\[]?\d+[a-z]?\)?[\],.;:]?\s*$", re.I)
 PROSE_WORD_RE = re.compile(
     r"\b(?:and|are|controls|from|growth|is|maximum|method|rate|the|this|value|where|with)\b",
     re.I,
@@ -65,10 +65,36 @@ def _is_formula_fragment(text: str) -> bool:
     return len(text) <= 2 or any(character.isdigit() or character.isupper() for character in text)
 
 
+def _is_prose_block(text: str) -> bool:
+    return len(re.findall(r"\b[\w'-]+\b", text)) >= 4 or PROSE_WORD_RE.search(text) is not None
+
+
 def _gap(first, second) -> tuple[float, float]:
     horizontal = max(first[0] - second[2], second[0] - first[2], 0)
     vertical = max(first[1] - second[3], second[1] - first[3], 0)
     return horizontal, vertical
+
+
+def _has_prose_barrier(
+    text_blocks: list[dict],
+    first: tuple[float, float, float, float],
+    second: tuple[float, float, float, float],
+) -> bool:
+    top = min(first[3], second[3])
+    bottom = max(first[1], second[1])
+    left = max(first[0], second[0])
+    right = min(first[2], second[2])
+    for block in text_blocks:
+        text = _block_text(block)
+        block_bbox = _bbox(block)
+        if not _is_prose_block(text):
+            continue
+        if block_bbox[3] <= top or block_bbox[1] >= bottom:
+            continue
+        if block_bbox[2] <= left or block_bbox[0] >= right:
+            continue
+        return True
+    return False
 
 
 def _formula_groups(page) -> list[tuple[tuple[float, float, float, float], list[dict]]]:
@@ -89,7 +115,11 @@ def _formula_groups(page) -> list[tuple[tuple[float, float, float, float], list[
             for block in list(remaining):
                 block_bbox = _bbox(block)
                 horizontal, vertical = _gap(group_bbox, block_bbox)
-                if horizontal <= 40 and vertical <= 32:
+                if (
+                    horizontal <= 40
+                    and vertical <= 32
+                    and not _has_prose_barrier(text_blocks, group_bbox, block_bbox)
+                ):
                     members.append(block)
                     group_bbox = _union_bbox(group_bbox, block_bbox)
                     remaining.remove(block)
@@ -107,31 +137,41 @@ def _formula_groups(page) -> list[tuple[tuple[float, float, float, float], list[
                 _is_formula_fragment(text)
                 and horizontal <= 40
                 and vertical <= 32
+                and not _has_prose_barrier(text_blocks, group_bbox, block_bbox)
             ):
                 members.append(block)
                 group_bbox = _union_bbox(group_bbox, block_bbox)
         groups[index] = (group_bbox, members)
 
-    for index, (group_bbox, members) in enumerate(groups):
-        for block in text_blocks:
+    assigned_numbers: set[int] = set()
+    for block in text_blocks:
+        text = _block_text(block)
+        if not EQUATION_NUMBER_RE.fullmatch(text):
+            continue
+        block_bbox = _bbox(block)
+        candidates = []
+        for index, (group_bbox, members) in enumerate(groups):
             if block in members:
                 continue
-            text = _block_text(block)
-            if not EQUATION_NUMBER_RE.fullmatch(text):
-                continue
-            block_bbox = _bbox(block)
             vertical = max(group_bbox[1] - block_bbox[3], block_bbox[1] - group_bbox[3], 0)
             horizontal = max(block_bbox[0] - group_bbox[2], group_bbox[0] - block_bbox[2], 0)
-            if vertical <= 14 and horizontal <= max(page.rect.width * 0.45, 80):
-                members.append(block)
-                group_bbox = _union_bbox(group_bbox, block_bbox)
-        groups[index] = (group_bbox, members)
+            if vertical <= 14 and horizontal <= max(page.rect.width * 0.65, 80):
+                candidates.append((vertical + horizontal * 0.01, index))
+        if not candidates:
+            continue
+        _score, index = min(candidates)
+        if index in assigned_numbers:
+            continue
+        group_bbox, members = groups[index]
+        members.append(block)
+        groups[index] = (_union_bbox(group_bbox, block_bbox), members)
+        assigned_numbers.add(index)
     return groups
 
 
 def _render_formula(page, bbox) -> bytes:
     page_rect = page.rect
-    padding = 6
+    padding = 2
     clip = fitz.Rect(
         max(page_rect.x0, bbox[0] - padding),
         max(page_rect.y0, bbox[1] - padding),
