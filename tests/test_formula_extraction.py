@@ -2,6 +2,7 @@ from io import BytesIO
 
 from PIL import Image
 from docx import Document
+from docx.oxml import parse_xml
 
 from paper2doc.docx_writer import write_docx
 from paper2doc.image_extractor import extract_images
@@ -90,6 +91,9 @@ def test_formula_text_is_rendered_once_and_removed_from_paragraphs():
     assert len(images) == 1
     formula = images[0]
     assert formula.is_formula is True
+    assert formula.formula_latex is not None
+    assert r"\sum" in formula.formula_latex
+    assert "(1)" in formula.formula_latex
     assert formula.image_bytes == b"formula-image"
     assert formula.bbox[0] == 100
     assert formula.bbox[2] == 520
@@ -140,3 +144,42 @@ def test_formula_image_is_not_added_to_translation_units(tmp_path):
 
     assert translator.units == [("paragraph:1", "Text before the equation.")]
     assert len(Document(output).inline_shapes) == 1
+
+
+def test_latex_formula_is_written_as_omml_before_image_fallback(tmp_path, monkeypatch):
+    image_data = BytesIO()
+    Image.new("RGB", (20, 10), "white").save(image_data, format="PNG")
+    omml = parse_xml(
+        '<m:oMathPara xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">'
+        "<m:oMath><m:r><m:t>x</m:t></m:r></m:oMath>"
+        "</m:oMathPara>"
+    )
+    monkeypatch.setattr("paper2doc.docx_writer.latex_to_omml", lambda _latex: omml)
+
+    class Translator:
+        def translate_batch(self, units):
+            return {unit_id: f"中文：{text}" for unit_id, text in units}
+
+    output = tmp_path / "formula-omml.docx"
+    write_docx(
+        [Paragraph(1, 0, (50, 50, 250, 70), "Text before the equation.")],
+        [
+            ImageBlock(
+                1,
+                0,
+                (50, 80, 150, 120),
+                image_data.getvalue(),
+                parent_paragraph_id=1,
+                is_formula=True,
+                formula_latex=r"\frac{a}{b}",
+            )
+        ],
+        Translator(),
+        output,
+        batch_size=1000,
+        batch_min_size=1,
+    )
+
+    document = Document(output)
+    assert len(document.inline_shapes) == 0
+    assert any(element.tag.endswith("}oMathPara") for element in document._element.body)

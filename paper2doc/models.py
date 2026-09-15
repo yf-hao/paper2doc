@@ -57,6 +57,7 @@ class ImageBlock:
     parent_paragraph_id: Optional[int] = None
     caption: Optional[str] = None
     is_formula: bool = False
+    formula_latex: str | None = None
 
 
 @dataclass
