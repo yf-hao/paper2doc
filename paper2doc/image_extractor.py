@@ -69,6 +69,31 @@ def _is_prose_block(text: str) -> bool:
     return len(re.findall(r"\b[\w'-]+\b", text)) >= 4 or PROSE_WORD_RE.search(text) is not None
 
 
+def _has_prose_line_neighbor(text_blocks: list[dict], fragment: dict) -> bool:
+    fragment_bbox = _bbox(fragment)
+    fragment_height = max(fragment_bbox[3] - fragment_bbox[1], 1.0)
+    fragment_center = (fragment_bbox[1] + fragment_bbox[3]) / 2
+    for block in text_blocks:
+        for line in block.get("lines", []):
+            line_text = "".join(span.get("text", "") for span in line.get("spans", []))
+            line_bbox = tuple(float(value) for value in line.get("bbox", block["bbox"]))
+            if not _is_prose_block(line_text):
+                continue
+            line_height = max(line_bbox[3] - line_bbox[1], 1.0)
+            line_center = (line_bbox[1] + line_bbox[3]) / 2
+            horizontal_gap = max(
+                fragment_bbox[0] - line_bbox[2],
+                line_bbox[0] - fragment_bbox[2],
+                0,
+            )
+            if (
+                abs(fragment_center - line_center) <= max(fragment_height, line_height) * 0.65
+                and horizontal_gap <= 12
+            ):
+                return True
+    return False
+
+
 def _gap(first, second) -> tuple[float, float]:
     horizontal = max(first[0] - second[2], second[0] - first[2], 0)
     vertical = max(first[1] - second[3], second[1] - first[3], 0)
@@ -137,6 +162,7 @@ def _formula_groups(page) -> list[tuple[tuple[float, float, float, float], list[
                 _is_formula_fragment(text)
                 and horizontal <= 40
                 and vertical <= 32
+                and not _has_prose_line_neighbor(text_blocks, block)
                 and not _has_prose_barrier(text_blocks, group_bbox, block_bbox)
             ):
                 members.append(block)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
-from .layout_analyzer import assign_columns, assign_regions, reading_order
+from .layout_analyzer import assign_columns, assign_regions, classify_column, reading_order
 from .models import BBox, ImageBlock, InlineFormula, Paragraph, TableBlock
 from .table_extractor import table_contains_bbox
 from .page_number_filter import filter_page_numbers
@@ -39,6 +39,172 @@ def _span_bbox(span: dict) -> BBox | None:
     return tuple(float(item) for item in value[:4])
 
 
+def _line_bbox(line: dict) -> BBox | None:
+    value = line.get("bbox")
+    if value and len(value) >= 4:
+        return tuple(float(item) for item in value[:4])
+    spans = [_span_bbox(span) for span in line.get("spans", [])]
+    spans = [span for span in spans if span]
+    if not spans:
+        return None
+    return (
+        min(span[0] for span in spans),
+        min(span[1] for span in spans),
+        max(span[2] for span in spans),
+        max(span[3] for span in spans),
+    )
+
+
+def _same_text_line(first: BBox, second: BBox) -> bool:
+    first_height = max(first[3] - first[1], 1.0)
+    second_height = max(second[3] - second[1], 1.0)
+    first_center = (first[1] + first[3]) / 2
+    second_center = (second[1] + second[3]) / 2
+    center_limit = max(first_height, second_height) * 0.55
+    horizontal_gap = max(first[0] - second[2], second[0] - first[2], 0)
+    return abs(first_center - second_center) <= center_limit and horizontal_gap <= 48
+
+
+def _merge_fragmented_text_blocks(blocks: list[dict], page_width: float) -> list[dict]:
+    """Reassemble text blocks split by inline math glyphs on the same line."""
+    if len(blocks) < 2:
+        return blocks
+
+    line_entries: list[tuple[int, dict, BBox, str]] = []
+    for block_index, block in enumerate(blocks):
+        for line in block.get("lines", []):
+            bbox = _line_bbox(line)
+            text = "".join(span.get("text", "") for span in line.get("spans", []))
+            if bbox and text.strip():
+                line_entries.append((block_index, line, bbox, text))
+    if len(line_entries) < 2:
+        return blocks
+
+    parents = list(range(len(blocks)))
+
+    def find(index: int) -> int:
+        while parents[index] != index:
+            parents[index] = parents[parents[index]]
+            index = parents[index]
+        return index
+
+    def union(first: int, second: int) -> None:
+        first_root = find(first)
+        second_root = find(second)
+        if first_root != second_root:
+            parents[second_root] = first_root
+
+    for index, (_block_index, _line, first_bbox, _text) in enumerate(line_entries):
+        first_column = classify_column(first_bbox, page_width)
+        for _other_index, (other_block_index, _other_line, second_bbox, _other_text) in enumerate(
+            line_entries[index + 1 :],
+            start=index + 1,
+        ):
+            if first_column != classify_column(second_bbox, page_width):
+                continue
+            if _same_text_line(first_bbox, second_bbox):
+                union(line_entries[index][0], other_block_index)
+
+    grouped: dict[int, list[int]] = {}
+    for block_index in range(len(blocks)):
+        grouped.setdefault(find(block_index), []).append(block_index)
+    if all(len(group) == 1 for group in grouped.values()):
+        return blocks
+
+    merged: list[dict] = []
+    for group in grouped.values():
+        if len(group) == 1:
+            merged.append(blocks[group[0]])
+            continue
+
+        group_set = set(group)
+        group_lines = [
+            entry
+            for entry in line_entries
+            if entry[0] in group_set
+        ]
+        line_groups: list[list[tuple[int, dict, BBox, str]]] = []
+        for entry in group_lines:
+            matching_group = next(
+                (
+                    current
+                    for current in line_groups
+                    if any(_same_text_line(entry[2], candidate[2]) for candidate in current)
+                ),
+                None,
+            )
+            if matching_group is None:
+                line_groups.append([entry])
+            else:
+                matching_group.append(entry)
+
+        merged_lines = []
+        for line_group in sorted(
+            line_groups,
+            key=lambda current: min(item[2][1] for item in current),
+        ):
+            spans = []
+            for _block_index, line, _bbox, _text in sorted(
+                line_group,
+                key=lambda current: (current[2][0], current[2][1]),
+            ):
+                spans.extend(line.get("spans", []))
+            spans.sort(
+                key=lambda span: (
+                    _span_bbox(span)[0] if _span_bbox(span) else float("inf"),
+                    _span_bbox(span)[1] if _span_bbox(span) else float("inf"),
+                )
+            )
+            ordered_spans = []
+            for span in spans:
+                if ordered_spans:
+                    previous = ordered_spans[-1]
+                    previous_bbox = _span_bbox(previous)
+                    current_bbox = _span_bbox(span)
+                    previous_text = str(previous.get("text", ""))
+                    current_text = str(span.get("text", ""))
+                    horizontal_gap = (
+                        current_bbox[0] - previous_bbox[2]
+                        if previous_bbox and current_bbox
+                        else 0
+                    )
+                    if (
+                        horizontal_gap > 2
+                        and previous_text
+                        and current_text
+                        and not previous_text[-1].isspace()
+                        and not current_text[0].isspace()
+                        and previous_text[-1] not in "([{"
+                        and current_text[0] not in ",.;:!?)]}"
+                    ):
+                        ordered_spans.append({"text": " "})
+                ordered_spans.append(span)
+            merged_lines.append(
+                {
+                    "bbox": (
+                        min(item[2][0] for item in line_group),
+                        min(item[2][1] for item in line_group),
+                        max(item[2][2] for item in line_group),
+                        max(item[2][3] for item in line_group),
+                    ),
+                    "spans": ordered_spans,
+                }
+            )
+        merged.append(
+            {
+                "type": 0,
+                "bbox": (
+                    min(blocks[index]["bbox"][0] for index in group),
+                    min(blocks[index]["bbox"][1] for index in group),
+                    max(blocks[index]["bbox"][2] for index in group),
+                    max(blocks[index]["bbox"][3] for index in group),
+                ),
+                "lines": merged_lines,
+            }
+        )
+    return merged
+
+
 def _inline_formulas(block: dict) -> list[InlineFormula]:
     formulas: list[InlineFormula] = []
     for line in block.get("lines", []):
@@ -47,36 +213,62 @@ def _inline_formulas(block: dict) -> list[InlineFormula]:
             for span in line.get("spans", [])
             if str(span.get("text", "")).strip() and _span_bbox(span)
         ]
-        for index in range(len(spans) - 1):
-            base_span = spans[index]
-            modifier_span = spans[index + 1]
+        consumed: set[int] = set()
+        for index, base_span in enumerate(spans):
+            if index in consumed:
+                continue
             base_text = str(base_span.get("text", "")).strip()
-            modifier_text = str(modifier_span.get("text", "")).strip()
             base_bbox = _span_bbox(base_span)
-            modifier_bbox = _span_bbox(modifier_span)
-            if (
-                not base_bbox
-                or not modifier_bbox
-                or len(base_text) > 2
-                or len(modifier_text) > 3
-                or modifier_bbox[0] - base_bbox[2] > 5
-            ):
+            if not base_bbox or len(base_text) > 2:
                 continue
             base_size = float(base_span.get("size", base_bbox[3] - base_bbox[1]))
-            modifier_size = float(modifier_span.get("size", modifier_bbox[3] - modifier_bbox[1]))
-            smaller = modifier_size <= base_size * 0.9
-            is_subscript = modifier_bbox[1] >= base_bbox[1] + (base_bbox[3] - base_bbox[1]) * 0.35
-            is_superscript = modifier_bbox[3] <= base_bbox[3] - (base_bbox[3] - base_bbox[1]) * 0.25
-            if not smaller or not (is_subscript or is_superscript):
+            subscript_parts = []
+            superscript_parts = []
+            modifier_indexes: set[int] = set()
+            for modifier_index in range(index + 1, len(spans)):
+                if modifier_index in consumed:
+                    continue
+                modifier_span = spans[modifier_index]
+                modifier_text = str(modifier_span.get("text", "")).strip()
+                modifier_bbox = _span_bbox(modifier_span)
+                if (
+                    not modifier_bbox
+                    or not modifier_text
+                    or len(modifier_text) > 3
+                    or modifier_bbox[0] < base_bbox[0] - 1
+                    or modifier_bbox[0] - base_bbox[2] > 2
+                ):
+                    continue
+                modifier_size = float(
+                    modifier_span.get("size", modifier_bbox[3] - modifier_bbox[1])
+                )
+                if modifier_size > base_size * 0.9:
+                    continue
+                base_height = base_bbox[3] - base_bbox[1]
+                is_subscript = modifier_bbox[1] >= base_bbox[1] + base_height * 0.3
+                is_superscript = modifier_bbox[3] <= base_bbox[3] - base_height * 0.25
+                if not (is_subscript or is_superscript):
+                    continue
+                modifier_indexes.add(modifier_index)
+                if is_subscript:
+                    subscript_parts.append((modifier_bbox[1], modifier_text))
+                if is_superscript:
+                    superscript_parts.append((modifier_bbox[1], modifier_text))
+            if not subscript_parts and not superscript_parts:
                 continue
+            subscript = "".join(text for _y, text in sorted(subscript_parts)) or None
+            superscript = "".join(text for _y, text in sorted(superscript_parts)) or None
             formulas.append(
                 InlineFormula(
-                    text=base_text + modifier_text,
+                    text=base_text
+                    + (superscript or "")
+                    + (subscript or ""),
                     base=base_text,
-                    subscript=modifier_text if is_subscript else None,
-                    superscript=modifier_text if is_superscript else None,
+                    subscript=subscript,
+                    superscript=superscript,
                 )
             )
+            consumed.update(modifier_indexes)
     return formulas
 
 
@@ -103,8 +295,8 @@ def merge_text_blocks(
             and previous.column == block.column
             and not any(
                 blocker.page == block.page
-                and blocker.bbox[1] >= previous.bbox[3]
-                and blocker.bbox[3] <= block.bbox[1]
+                and blocker.bbox[1] >= previous.bbox[3] - 1
+                and blocker.bbox[1] <= block.bbox[3]
                 and blocker.column in {block.column, "full"}
                 for blocker in blockers
             )
@@ -232,6 +424,7 @@ def extract_paragraphs(
     next_id = 1
     for page_number, page in enumerate(document):
         page_widths[page_number] = page.rect.width
+        page_blocks = []
         for block in page.get_text("dict").get("blocks", []):
             if block.get("type") != 0:
                 continue
@@ -246,6 +439,10 @@ def extract_paragraphs(
                 for image in images
             ):
                 continue
+            page_blocks.append(block)
+        for block in _merge_fragmented_text_blocks(page_blocks, page.rect.width):
+            text = _block_text(block)
+            bbox = tuple(float(value) for value in block["bbox"])
             blocks.append(
                 Paragraph(
                     id=next_id,

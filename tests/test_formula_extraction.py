@@ -247,6 +247,75 @@ def test_inline_formula_metadata_survives_text_block_merging():
     ]
 
 
+def test_inline_formula_fragments_after_display_equation_stay_in_one_paragraph():
+    page = FormulaPage()
+    page.blocks = [
+        {
+            "type": 0,
+            "bbox": (100, 100, 300, 115),
+            "lines": [{"spans": [{"text": "x = y", "bbox": (100, 100, 140, 115), "size": 12}]}],
+        },
+        {
+            "type": 0,
+            "bbox": (100, 140, 180, 153),
+            "lines": [
+                {
+                    "bbox": (100, 140, 180, 153),
+                    "spans": [{"text": "where r is the maximum rate, ", "bbox": (100, 140, 180, 153), "size": 12}],
+                }
+            ],
+        },
+        {
+            "type": 0,
+            "bbox": (181, 136, 183, 145),
+            "lines": [{"bbox": (181, 136, 183, 145), "spans": [{"text": "(", "bbox": (181, 136, 183, 145)}]}],
+        },
+        {
+            "type": 0,
+            "bbox": (184, 138, 197, 153),
+            "lines": [
+                {
+                    "bbox": (184, 138, 197, 153),
+                    "spans": [
+                        {"text": "x", "bbox": (184, 140, 190, 153), "size": 12},
+                        {"text": "opt", "bbox": (190, 138, 197, 148), "size": 8},
+                    ],
+                }
+            ],
+        },
+        {
+            "type": 0,
+            "bbox": (190, 148, 194, 156),
+            "lines": [{"bbox": (190, 148, 194, 156), "spans": [{"text": "i", "bbox": (190, 148, 194, 156), "size": 8}]}],
+        },
+        {
+            "type": 0,
+            "bbox": (198, 136, 200, 145),
+            "lines": [{"bbox": (198, 136, 200, 145), "spans": [{"text": ")", "bbox": (198, 136, 200, 145)}]}],
+        },
+        {
+            "type": 0,
+            "bbox": (201, 140, 280, 153),
+            "lines": [{"bbox": (201, 140, 280, 153), "spans": [{"text": " is the optimal combination.", "bbox": (201, 140, 280, 153), "size": 12}]}],
+        },
+    ]
+
+    images = extract_images([page])
+    paragraphs = extract_paragraphs(
+        [page],
+        remove_page_numbers=False,
+        remove_running_headers=False,
+        images=images,
+    )
+
+    assert len(images) == 1
+    assert len(paragraphs) == 1
+    assert paragraphs[0].text == "where r is the maximum rate, (xopti) is the optimal combination."
+    assert paragraphs[0].inline_formulas == [
+        InlineFormula(text="xopti", base="x", subscript="i", superscript="opt")
+    ]
+
+
 def test_inline_subscript_is_written_as_word_math_not_an_image(tmp_path):
     formula = InlineFormula(text="ux", base="u", subscript="x")
     output = tmp_path / "inline-formula.docx"
