@@ -13,6 +13,14 @@ from .running_header_filter import filter_running_headers
 CAPTION_RE = re.compile(r"^\s*(?:fig(?:ure)?|图)\s*[\w.-]*\s*[:.]?", re.I)
 
 
+def _overlap(first: BBox, second: BBox) -> float:
+    width = max(0.0, min(first[2], second[2]) - max(first[0], second[0]))
+    height = max(0.0, min(first[3], second[3]) - max(first[1], second[1]))
+    area = width * height
+    source = max((first[2] - first[0]) * (first[3] - first[1]), 1.0)
+    return area / source
+
+
 def _block_text(block: dict) -> str:
     lines = []
     for line in block.get("lines", []):
@@ -183,6 +191,11 @@ def extract_paragraphs(
                 continue
             bbox = tuple(float(value) for value in block["bbox"])
             if any(table_contains_bbox(table, bbox) for table in tables):
+                continue
+            if any(
+                image.is_formula and _overlap(bbox, image.bbox) >= 0.5
+                for image in images
+            ):
                 continue
             blocks.append(
                 Paragraph(

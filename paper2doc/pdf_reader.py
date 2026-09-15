@@ -21,7 +21,10 @@ def read_pdf(
     with fitz.open(path) as document:
         scan_info = detect_scan(document)
         tables = extract_tables(document)
-        images = extract_images(document)
+        table_bboxes: dict[int, list[tuple[float, float, float, float]]] = {}
+        for table in tables:
+            table_bboxes.setdefault(table.page, []).append(table.bbox)
+        images = extract_images(document, exclude_bboxes=table_bboxes)
         paragraphs = extract_paragraphs(
             document,
             remove_page_numbers=remove_page_numbers,

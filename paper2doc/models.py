@@ -56,6 +56,7 @@ class ImageBlock:
     region: int = 0
     parent_paragraph_id: Optional[int] = None
     caption: Optional[str] = None
+    is_formula: bool = False
 
 
 @dataclass

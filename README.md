@@ -210,6 +210,9 @@ paper2doc paper.pdf --checkpoint-dir ./checkpoints
 - Text that continues from the end of the left column into the right column, or across a
   page break, is merged into one logical paragraph. Headings, lists, captions, tables,
   and genuine new paragraphs remain separate.
+- Display equations are detected separately from body text and rendered from the PDF as
+  images in the DOCX. Their symbols, subscripts, superscripts, layout, and equation
+  numbers are not sent to the translation service.
 - A `Fig. 6` reference does not move an image.
 - The first version outputs a single-column DOCX to preserve reading order.
 - Text-based PDF tables are detected with PyMuPDF table APIs when available,
