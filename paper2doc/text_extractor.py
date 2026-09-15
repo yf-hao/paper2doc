@@ -134,6 +134,7 @@ def _append_layout_part(previous: Paragraph, block: Paragraph) -> None:
         previous.layout_parts.extend(block.layout_parts)
     else:
         previous.layout_parts.append((block.page, block.bbox, block.column))
+    previous.inline_formulas.extend(block.inline_formulas)
 
 
 def _union_bbox(first: BBox, second: BBox) -> BBox:

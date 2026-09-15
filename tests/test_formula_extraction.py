@@ -212,6 +212,41 @@ def test_inline_subscript_is_detected_from_span_geometry():
     ]
 
 
+def test_inline_formula_metadata_survives_text_block_merging():
+    page = FormulaPage()
+    page.blocks = [
+        {
+            "type": 0,
+            "bbox": (50, 100, 250, 112),
+            "lines": [{"spans": [{"text": "The value ", "bbox": (50, 100, 100, 112), "size": 12}]}],
+        },
+        {
+            "type": 0,
+            "bbox": (50, 116, 250, 128),
+            "lines": [
+                {
+                    "spans": [
+                        {"text": "u", "bbox": (100, 116, 108, 128), "size": 12},
+                        {"text": "x", "bbox": (109, 122, 115, 132), "size": 8},
+                        {"text": " is measured.", "bbox": (116, 116, 190, 128), "size": 12},
+                    ]
+                }
+            ],
+        },
+    ]
+
+    paragraphs = extract_paragraphs(
+        [page],
+        remove_page_numbers=False,
+        remove_running_headers=False,
+    )
+
+    assert len(paragraphs) == 1
+    assert paragraphs[0].inline_formulas == [
+        InlineFormula(text="ux", base="u", subscript="x")
+    ]
+
+
 def test_inline_subscript_is_written_as_word_math_not_an_image(tmp_path):
     formula = InlineFormula(text="ux", base="u", subscript="x")
     output = tmp_path / "inline-formula.docx"
